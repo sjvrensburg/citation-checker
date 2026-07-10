@@ -162,13 +162,20 @@ def parse_bibtex(text: str) -> List[Claim]:
             year = int(ym.group(1)) if ym else None
         venue = f.get("journal") or f.get("booktitle") or f.get("publisher") \
             or f.get("school") or f.get("institution")
-        doi = clean_doi(f.get("doi")) or find_doi(f.get("url", "")) \
-            or find_doi(f.get("note", ""))
-        arxiv = clean_arxiv(f.get("eprint")) if f.get("archiveprefix", "").lower() == "arxiv" \
-            else None
+        # Identifiers are often mislabeled — a DOI in `url`, an arXiv id stuffed
+        # into `journal` ("arXiv preprint arXiv:2310.01063") or `note`. Prefer the
+        # dedicated fields, then fall back to scanning every field value so a
+        # buried-but-real identifier still gets cross-checked (this is exactly
+        # how a fabricated author list on a real arXiv id gets caught).
+        all_values = " ".join(f.values())
+        doi = (clean_doi(f.get("doi")) or find_doi(f.get("url", ""))
+               or find_doi(f.get("note", "")) or find_doi(all_values))
+        arxiv = clean_arxiv(f.get("eprint")) \
+            if f.get("archiveprefix", "").lower() == "arxiv" else None
         if not arxiv:
-            arxiv = find_arxiv(f.get("eprint", "")) or find_arxiv(f.get("note", "")) \
-                or find_arxiv(f.get("url", ""))
+            arxiv = (find_arxiv(f.get("eprint", "")) or find_arxiv(f.get("note", ""))
+                     or find_arxiv(f.get("url", "")) or find_arxiv(f.get("journal", ""))
+                     or find_arxiv(all_values))
         claims.append(Claim(
             key=key, raw=f"@{etype}{{{key}}}", title=f.get("title"),
             authors=_bibtex_authors(f.get("author", "")), year=year,

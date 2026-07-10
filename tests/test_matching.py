@@ -132,6 +132,14 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(c.year, 2017)
         self.assertEqual(c.doi, "10.48550/arXiv.1706.03762")
 
+    def test_bibtex_arxiv_id_buried_in_journal_field(self):
+        # A fabricated citation can hide a real arXiv id in a mislabeled field;
+        # it must still be extracted so the id gets cross-checked.
+        bib = ("@article{x, title={Some Title}, author={Fake, A.}, "
+               "journal={arXiv preprint arXiv:2310.01063}, year={2024}}")
+        c = parse_bibtex(bib)[0]
+        self.assertEqual(c.arxiv_id, "2310.01063")
+
     def test_prose_numbered(self):
         text = ("References\n"
                 "[1] Vaswani, A., Shazeer, N. (2017). Attention is all you need. NeurIPS.\n"
