@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "citecheck"
+version = "0.1.0"
+description = "Verify academic citations against canonical scholarly sources (catches valid-DOI-wrong-paper and wrong-metadata fabrications)."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "sjvrensburg" }]
+keywords = ["citation", "bibtex", "crossref", "openalex", "arxiv", "academic", "verification"]
+dependencies = []   # standard library only, by design
+
+[project.scripts]
+citecheck = "citecheck.cli:main"
+
+[tool.setuptools]
+packages = ["citecheck"]
