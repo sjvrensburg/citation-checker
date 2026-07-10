@@ -65,14 +65,52 @@ class TestVerdicts(unittest.TestCase):
                      authors=["Vaswani, Ashish"], year=2017)
         self.assertEqual(decide(claim, rec).status, METADATA_MISMATCH)
 
-    def test_year_off_by_one_is_minor(self):
+    def test_year_off_by_one_verified_when_rest_matches(self):
+        # Item 5: online-first vs. print drift on an otherwise perfect match
+        # should verify, not demote to a mismatch — under both tolerances.
         claim = self._claim(year=2018, doi="10.x")
         rec = Record("crossref", "doi", title="Attention Is All You Need",
                      authors=["Vaswani, Ashish"], year=2017)
-        # LENIENT tolerates ±1 year -> not a problem
         self.assertEqual(decide(claim, rec, LENIENT).status, VERIFIED)
-        # STRICT tolerance 0 -> minor
+        self.assertEqual(decide(claim, rec, STRICT).status, VERIFIED)
+
+    def test_year_off_by_one_still_minor_if_title_weak(self):
+        # A borderline title match + year drift should stay a minor mismatch.
+        claim = self._claim(year=2018, doi="10.x")
+        rec = Record("crossref", "doi",
+                     title="Attention Is All You Need for Something Else",
+                     authors=["Vaswani, Ashish"], year=2017)
         self.assertEqual(decide(claim, rec, STRICT).status, MINOR_MISMATCH)
+
+    def test_same_title_different_work_not_asserted_as_mismatch(self):
+        # Item 4: title-search hit with the SAME title but different authors and
+        # a far-off year is a review/citing work, not the miscited paper.
+        claim = Claim(key="Embrechts1997",
+                      title="Modelling Extremal Events for Insurance and Finance",
+                      authors=["Embrechts, P.", "Kluppelberg, C."], year=1997)
+        review = Record("openalex", "title-search",
+                        title="Modelling Extremal Events for Insurance and Finance",
+                        authors=["Jem N. Corcoran"], year=2002)
+        self.assertEqual(decide(claim, review, STRICT).status, NOT_FOUND)
+
+    def test_wrong_author_right_year_is_still_metadata_mismatch(self):
+        # The item-4 guard must NOT swallow a genuine wrong-author citation of
+        # the real paper (same title, same year, wrong author).
+        claim = self._claim(authors=["Smith, John"])   # year stays 2017
+        rec = Record("crossref", "title-search",
+                     title="Attention Is All You Need",
+                     authors=["Vaswani, Ashish", "Shazeer, Noam"], year=2017)
+        self.assertEqual(decide(claim, rec, STRICT).status, METADATA_MISMATCH)
+
+    def test_best_record_prefers_author_match_over_same_title(self):
+        from citecheck.matching import best_record
+        claim = Claim(key="e", title="Modelling Extremal Events",
+                      authors=["Embrechts, P."], year=1997)
+        book = Record("crossref", "title-search", title="Modelling Extremal Events",
+                      authors=["Paul Embrechts", "Claudia Kluppelberg"], year=1997)
+        review = Record("openalex", "title-search", title="Modelling Extremal Events",
+                        authors=["Jem N. Corcoran"], year=2002)
+        self.assertIs(best_record(claim, [review, book]), book)
 
     def test_weak_title_search_is_not_found(self):
         claim = self._claim()

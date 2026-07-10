@@ -270,12 +270,39 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
             )
             return Verdict(claim, DOI_MISMATCH, conf, rec, checks, messages)
 
+    first_author_check = next((c for c in checks if c.field == "first_author"), None)
+    authors_check = next((c for c in checks if c.field == "authors"), None)
+    year_check = next((c for c in checks if c.field == "year"), None)
+
     # If matched only by title search, require the titles to actually be the same work.
     if rec.matched_by == "title-search" and title_check is not None:
         if title_check.similarity < th.title_same:
             messages.append(
                 f"Best title-search candidate is not a confident match "
                 f"(similarity {title_check.similarity:.2f}); treat as unverified."
+            )
+            v = Verdict(claim, NOT_FOUND, conf, None, checks, messages)
+            v.considered = [rec]
+            return v
+
+        # Item 4: a strong title match whose authors are *entirely* absent AND
+        # whose year is far off is most likely a DIFFERENT work that happens to
+        # share the title — a review, book chapter, erratum, or citing article —
+        # not the cited paper miscited. (Contrast: a wrong-author citation of the
+        # real paper still has the right *year*, so this guard leaves it alone.)
+        author_absent = (
+            first_author_check is not None and not first_author_check.ok
+            and (authors_check is None or authors_check.similarity < 0.34)
+        )
+        year_far = (year_check is not None and not year_check.ok
+                    and year_check.severity == "major")
+        if author_absent and year_far:
+            messages.append(
+                f"Found a same-titled work by different authors "
+                f"(“{rec.title}” — {', '.join(rec.authors[:3]) or 'unknown'}, "
+                f"{rec.year}); this looks like a review or citing work, not the "
+                f"cited paper. Could not confirm the citation — likely needs a "
+                f"DOI or a Google Scholar check."
             )
             v = Verdict(claim, NOT_FOUND, conf, None, checks, messages)
             v.considered = [rec]
@@ -291,6 +318,19 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
                             f"(claimed={c.claimed!r}, found={c.found!r}).")
         return Verdict(claim, METADATA_MISMATCH, conf, rec, checks, messages)
 
+    # Item 5: when title and authors match cleanly, a ±1-year gap is just
+    # online-first vs. print drift — verify it, don't demote it to a mismatch.
+    title_strong = title_check is not None and title_check.similarity >= 0.95
+    authors_clean = ((first_author_check is None or first_author_check.ok)
+                     and (authors_check is None or authors_check.ok))
+    only_year_drift = (minors and all(c.field == "year" for c in minors)
+                       and all(c.similarity >= 0.8 for c in minors))
+    if only_year_drift and title_strong and authors_clean:
+        messages.append(f"Verified against {rec.source} (matched by "
+                        f"{rec.matched_by}); note: cited year {claim.year} vs. "
+                        f"{rec.year} on record (online-first vs. print).")
+        return Verdict(claim, VERIFIED, conf, rec, checks, messages)
+
     if minors:
         for c in minors:
             messages.append(f"{c.field}: {c.note or 'minor difference'}.")
@@ -301,19 +341,36 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
     return Verdict(claim, VERIFIED, conf, rec, checks, messages)
 
 
+def record_match_score(claim: Claim, rec: Record) -> float:
+    """Score how well a candidate record matches the claim (for ranking).
+
+    Author agreement is weighted heavily so that, among several works sharing a
+    title (e.g. a paper and a later review of it), the one actually written by
+    the cited authors wins.
+    """
+    score = title_similarity(claim.title, rec.title) if claim.title else 0.0
+    if claim.authors and rec.authors:
+        c = set(surnames(claim.authors))
+        r = set(surnames(rec.authors))
+        if c and r:
+            # First-author agreement is the strongest signal of "same work".
+            if surname(claim.authors[0]) in r:
+                score += 0.5
+            score += 0.3 * (len(c & r) / len(c))
+    if claim.year and rec.year:
+        diff = abs(claim.year - rec.year)
+        if diff <= 1:
+            score += 0.1
+        elif diff >= 3:
+            score -= 0.15   # penalize records from a very different year
+    return score
+
+
 def best_record(claim: Claim, candidates: List[Record]) -> Optional[Record]:
     """Pick the record most likely to be the claimed work from title-search hits."""
     best: Optional[Tuple[float, Record]] = None
     for rec in candidates:
-        sim = title_similarity(claim.title, rec.title) if claim.title else 0.0
-        # Nudge by author/year agreement so ties break sensibly.
-        if claim.authors and rec.authors:
-            c = set(surnames(claim.authors))
-            r = set(surnames(rec.authors))
-            if c and r:
-                sim += 0.1 * (len(c & r) / len(c))
-        if claim.year and rec.year and abs(claim.year - rec.year) <= 1:
-            sim += 0.05
+        sim = record_match_score(claim, rec)
         if best is None or sim > best[0]:
             best = (sim, rec)
     return best[1] if best else None

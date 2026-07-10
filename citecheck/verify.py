@@ -62,15 +62,20 @@ def _resolve_by_title(claim: Claim) -> List[Record]:
         lambda: S.openalex_search(claim.title),
         lambda: S.s2_search(claim.title),
     ]
+    from citecheck.matching import surname, surnames
+    claim_first = surname(claim.authors[0]) if claim.authors else None
     for fn in searchers:
         try:
             candidates.extend(fn())
         except Exception:
             continue
-        # Early exit: a near-perfect title hit is enough.
+        # Early exit only on a near-perfect title hit whose first author also
+        # agrees — otherwise keep searching, since a same-titled review or
+        # citing work can score a perfect title while being the wrong record.
         for c in candidates:
             if title_similarity(claim.title, c.title) >= 0.95:
-                return candidates
+                if claim_first is None or claim_first in set(surnames(c.authors)):
+                    return candidates
     return candidates
 
 

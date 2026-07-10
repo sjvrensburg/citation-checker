@@ -63,3 +63,11 @@ is decided by rules, because the *type* of mismatch matters more than an average
   diff — expected, not an error.
 - Author checks against **Google Scholar** rows are weaker because Scholar
   abbreviates given names; title + year carry the Scholar verdict.
+- **Online-first vs. print year:** when the title and authors match cleanly, a
+  ±1-year gap is treated as online-first/print drift and reported as `VERIFIED`
+  with a note (not a mismatch).
+- **Same-titled different work:** a title-search hit whose authors are entirely
+  absent *and* whose year is far off (e.g. a book and a later *review* sharing a
+  title) is not asserted as a mismatch. Ranking weights first-author agreement
+  heavily so the real work beats a namesake; if only the namesake is found, the
+  citation is reported unresolved (`NOT_FOUND` / `NEEDS_SCHOLAR`), not wrong.
