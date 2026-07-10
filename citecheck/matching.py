@@ -257,22 +257,40 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
     checks = build_checks(claim, rec, th)
     conf = _confidence(checks)
     title_check = next((c for c in checks if c.field == "title"), None)
+    first_author_check = next((c for c in checks if c.field == "first_author"), None)
+    authors_check = next((c for c in checks if c.field == "authors"), None)
+    year_check = next((c for c in checks if c.field == "year"), None)
+    venue_check = next((c for c in checks if c.field == "venue"), None)
     by_identifier = rec.matched_by in ("doi", "arxiv")
 
     messages: List[str] = []
 
     # --- Identifier integrity: does the DOI/arXiv point to the claimed paper? ---
-    if by_identifier and title_check is not None:
-        if title_check.similarity < th.title_different:
+    if by_identifier and title_check is not None and \
+            title_check.similarity < th.title_different:
+        # A low title similarity alone is ambiguous: publishers sometimes
+        # register a short/abbreviated title. If the author, year, and venue all
+        # corroborate, the identifier points to the SAME work and the *title* is
+        # simply wrong/embellished — a metadata error, not a different paper.
+        corroborators = [c for c in (first_author_check, year_check, venue_check)
+                         if c is not None]
+        corroborated = (first_author_check is not None and first_author_check.ok
+                        and (year_check is None or year_check.ok)
+                        and len(corroborators) >= 2
+                        and all(c.ok for c in corroborators))
+        if corroborated:
             messages.append(
-                f"The {rec.matched_by.upper()} resolves, but to a DIFFERENT paper: "
-                f"claimed “{claim.title}” vs. actual “{rec.title}”."
+                f"The {rec.matched_by.upper()} points to the correct work "
+                f"(author, year, and venue match), but the cited TITLE does not "
+                f"match the registered title: claimed “{claim.title}” vs. "
+                f"registered “{rec.title}”. The title appears wrong or embellished."
             )
-            return Verdict(claim, DOI_MISMATCH, conf, rec, checks, messages)
-
-    first_author_check = next((c for c in checks if c.field == "first_author"), None)
-    authors_check = next((c for c in checks if c.field == "authors"), None)
-    year_check = next((c for c in checks if c.field == "year"), None)
+            return Verdict(claim, METADATA_MISMATCH, conf, rec, checks, messages)
+        messages.append(
+            f"The {rec.matched_by.upper()} resolves, but to a DIFFERENT paper: "
+            f"claimed “{claim.title}” vs. actual “{rec.title}”."
+        )
+        return Verdict(claim, DOI_MISMATCH, conf, rec, checks, messages)
 
     # If matched only by title search, require the titles to actually be the same work.
     if rec.matched_by == "title-search" and title_check is not None:

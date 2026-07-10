@@ -53,6 +53,19 @@ class TestVerdicts(unittest.TestCase):
                      authors=["He, Kaiming"], year=2016)
         self.assertEqual(decide(self._claim(doi="10.x"), rec).status, DOI_MISMATCH)
 
+    def test_doi_correct_but_title_embellished(self):
+        # DOI resolves; author+year+venue corroborate the same work, but the
+        # cited title differs -> a title metadata error, NOT "different paper".
+        claim = Claim(key="p", title="Financial Time Series and Volatility "
+                      "Prediction Using NoVaS", authors=["Politis, Dimitris N."],
+                      year=2009, venue="WIREs Computational Statistics", doi="10.x")
+        rec = Record("crossref", "doi", title="Financial time series",
+                     authors=["Dimitris N. Politis"], year=2009,
+                     venue="WIREs Computational Statistics")
+        v = decide(claim, rec, STRICT)
+        self.assertEqual(v.status, METADATA_MISMATCH)
+        self.assertIn("TITLE", " ".join(v.messages))
+
     def test_wrong_first_author(self):
         claim = self._claim(authors=["Smith, John"], doi="10.x")
         rec = Record("crossref", "doi", title="Attention Is All You Need",
