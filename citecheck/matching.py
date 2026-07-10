@@ -93,9 +93,15 @@ def surname(name: str) -> str:
         if not tokens:
             return ""
         last = tokens[-1]
-        # pull in a preceding particle: "van der Berg" -> "van der berg"
-        particles = {"van", "von", "der", "den", "de", "di", "da", "del",
-                     "la", "le", "al", "bin", "ibn", "dos", "das"}
+        # pull in preceding nobiliary/compound particles:
+        # "van der Berg" -> "van der berg", "Davide Delle Monache" -> "delle monache"
+        particles = {
+            "van", "von", "vander", "der", "den", "ter", "ten", "te",
+            "de", "del", "della", "delle", "dell", "degli", "dei", "di",
+            "da", "dos", "das", "du", "la", "le", "las", "los", "lo",
+            "af", "av", "bin", "ibn", "al", "el", "abu", "mac", "mc",
+            "san", "santa", "saint", "st", "ould",
+        }
         i = len(tokens) - 2
         parts = [last]
         while i >= 0 and tokens[i].lower() in particles:

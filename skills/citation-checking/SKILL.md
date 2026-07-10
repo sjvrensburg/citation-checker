@@ -52,6 +52,9 @@ python3 -m citecheck check references.bib
 # A prose/Markdown document with a References section
 python3 -m citecheck check paper.md
 
+# A LaTeX file with an embedded \bibitem/thebibliography block (keys preserved)
+python3 -m citecheck check paper.tex
+
 # A loose list of DOIs / arXiv IDs / one-line citations (or stdin)
 python3 -m citecheck check sources.txt
 echo "Vaswani et al. 2017, Attention Is All You Need, NeurIPS" | \

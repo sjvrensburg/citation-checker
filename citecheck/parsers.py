@@ -200,6 +200,74 @@ def extract_cite_keys(tex_text: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
+# LaTeX \bibitem / thebibliography (embedded bibliographies)
+# ---------------------------------------------------------------------------
+
+import unicodedata as _unicodedata
+
+_THEBIB_RE = re.compile(
+    r"\\begin\{thebibliography\}.*?\n(.*?)\\end\{thebibliography\}", re.S)
+
+
+def clean_latex(s: str) -> str:
+    """Best-effort conversion of a LaTeX reference string to plain text.
+
+    Resolves accent commands (\\\"{u} -> u, \\'{o} -> o), unwraps \\emph{...} and
+    similar, handles \\& and ~, strips remaining braces/commands, and drops any
+    combining marks left behind.
+    """
+    if not s:
+        return ""
+    # Accent commands with a braced/plain argument: \"{u}, \'o, \c{c}
+    s = re.sub(r"\\[\"'`^~=.uvHck]\s*\{?\\?([a-zA-Z])\}?", r"\1", s)
+    s = re.sub(r"\\[a-zA-Z]+\s*\{([^{}]*)\}", r"\1", s)   # \emph{x} -> x
+    s = s.replace(r"\&", "&").replace(r"\%", "%").replace(r"\$", "$")
+    s = s.replace("~", " ").replace("--", "-")
+    s = s.replace("{", "").replace("}", "")
+    s = re.sub(r"\\[a-zA-Z]+", "", s)                     # leftover \commands
+    s = s.replace("\\", "")
+    s = "".join(c for c in _unicodedata.normalize("NFKD", s)
+                if not _unicodedata.combining(c))
+    return " ".join(s.split())
+
+
+def is_thebibliography(text: str) -> bool:
+    return "\\bibitem" in text or "\\begin{thebibliography}" in text
+
+
+def parse_thebibliography(text: str) -> List[Claim]:
+    """Parse a LaTeX ``thebibliography`` block, preserving real \\bibitem keys.
+
+    Each ``\\bibitem[label]{key}`` is followed by a free-form reference string;
+    the reference text is LaTeX-cleaned and parsed with the same year-anchored
+    heuristics used for prose bibliographies.
+    """
+    m = _THEBIB_RE.search(text)
+    block = m.group(1) if m else text
+    claims: List[Claim] = []
+    # Split on \bibitem; the first chunk (preamble) has no key and is skipped.
+    for idx, part in enumerate(re.split(r"\\bibitem", block)):
+        part = part.strip()
+        if not part:
+            continue
+        km = re.match(r"(?:\[[^\]]*\])?\s*\{([^}]+)\}", part)
+        if not km:
+            continue
+        key = km.group(1).strip()
+        ref = clean_latex(part[km.end():].strip())
+        if not ref:
+            continue
+        ym = YEAR_RE.search(ref)
+        claims.append(Claim(
+            key=key, raw=ref, title=_guess_title(ref),
+            authors=_guess_authors(ref),
+            year=int(ym.group(1)) if ym else None,
+            doi=find_doi(ref), arxiv_id=find_arxiv(ref),
+        ))
+    return claims
+
+
+# ---------------------------------------------------------------------------
 # Prose / Markdown reference lists
 # ---------------------------------------------------------------------------
 
@@ -241,32 +309,48 @@ def _split_reference_list(text: str) -> List[str]:
     return [ln.strip() for ln in lines if ln.strip()]
 
 
+# The publication year that separates the author list from the title. Matches
+# a parenthesized year — "(2015)", "(2020a)" — OR a bare year followed by a
+# period/comma — "..., 2024. Title" — which is the dominant style in embedded
+# \bibitem bibliographies. A negative lookbehind avoids matching inside a
+# larger number (e.g. a volume or page range).
+_YEAR_ANCHOR_RE = re.compile(
+    r"\(\s*(1[89]\d{2}|20\d{2})[a-z]?\s*\)"
+    r"|(?<!\d)(1[89]\d{2}|20\d{2})[a-z]?(?=\s*[.,])")
+
+
+def _year_anchor(entry: str):
+    """Return the match object for the year that delimits authors from title."""
+    return _YEAR_ANCHOR_RE.search(entry or "")
+
+
 def _guess_title(entry: str) -> Optional[str]:
     """Heuristically pull a title out of a free-form reference string."""
-    # Quoted title.
+    # Quoted title (most reliable).
     m = re.search(r"[\"“]([^\"”]{6,})[\"”]", entry)
     if m:
         return m.group(1).strip().rstrip(".")
-    # APA: authors (year). Title. Venue...
-    m = re.search(r"\(\s*(?:1[89]\d{2}|20\d{2})[a-z]?\s*\)\.?\s*(.+?)\.\s",
-                  entry)
-    if m:
-        return m.group(1).strip()
-    # Fallback: the longest sentence-like chunk between periods.
+    # Year-anchored: everything after the publication year, up to the sentence
+    # break that precedes the venue. Handles both "(year). Title." and
+    # "authors, year. Title." forms.
+    ya = _year_anchor(entry)
+    if ya:
+        after = entry[ya.end():].lstrip(" .,)")
+        title = re.split(r"\.\s", after, 1)[0].strip().rstrip(".")
+        if len(title) >= 6:
+            return title
+    # Fallback: the first sentence-like chunk that isn't an author list.
     chunks = [c.strip() for c in entry.split(".") if len(c.strip()) > 15]
-    if chunks:
-        # skip a leading author chunk (has commas + initials)
-        for c in chunks:
-            if not re.match(r"^[A-Z][a-z]+,\s*[A-Z]\.", c):
-                return c
-        return chunks[0]
-    return None
+    for c in chunks:
+        if not re.match(r"^,?\s*[A-Z][\w'’-]+,\s*[A-Z]\.", c):
+            return c
+    return chunks[0] if chunks else None
 
 
 def _guess_authors(entry: str) -> List[str]:
-    """Author list is usually the text before the year."""
-    m = re.search(r"^(.*?)\(?\s*(?:1[89]\d{2}|20\d{2})", entry)
-    head = m.group(1) if m else entry[:120]
+    """Author list is usually the text before the publication year."""
+    ya = _year_anchor(entry)
+    head = entry[:ya.start()] if ya else entry[:120]
     head = head.strip().rstrip("(,. ")
     if not head:
         return []
@@ -345,7 +429,9 @@ def detect_and_parse(text: str, fmt: str = "auto",
     fmt = (fmt or "auto").lower()
     if fmt == "auto":
         low = filename.lower()
-        if low.endswith(".bib") or re.search(r"@\w+\s*\{", text):
+        if is_thebibliography(text):
+            fmt = "latex"                       # embedded \bibitem bibliography
+        elif low.endswith(".bib") or re.search(r"@\w+\s*\{", text):
             fmt = "bibtex"
         elif low.endswith(".tex"):
             fmt = "bibtex"  # a .tex alone has no entries; handled via consistency
@@ -356,6 +442,11 @@ def detect_and_parse(text: str, fmt: str = "auto",
             fmt = "prose"
         else:
             fmt = "loose"
+    if fmt == "latex":
+        claims = parse_thebibliography(text)
+        if claims:
+            return claims
+        return parse_reference_list(text)
     if fmt == "bibtex":
         claims = parse_bibtex(text)
         if claims:

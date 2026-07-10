@@ -140,8 +140,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--string", action="store_true",
                    help="treat INPUT as a literal citation string, not a path")
     c.add_argument("-f", "--format", default="auto",
-                   choices=["auto", "bibtex", "prose", "loose"],
-                   help="input format (default: auto-detect)")
+                   choices=["auto", "bibtex", "latex", "prose", "loose"],
+                   help="input format (default: auto-detect; 'latex' = embedded "
+                        "\\bibitem/thebibliography)")
     c.add_argument("-o", "--output", help="write report to FILE instead of stdout")
     c.add_argument("--format-out", default="text",
                    choices=["text", "markdown", "json"],

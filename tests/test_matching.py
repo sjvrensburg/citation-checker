@@ -9,6 +9,7 @@ from citecheck.matching import (
 )
 from citecheck.parsers import (
     parse_bibtex, parse_reference_list, parse_loose, extract_cite_keys,
+    parse_thebibliography, clean_latex, _guess_title,
 )
 from citecheck.scholar import match_scholar_results
 
@@ -20,6 +21,13 @@ class TestNormalization(unittest.TestCase):
         self.assertEqual(surname("A. Vaswani"), "vaswani")
         self.assertEqual(surname("van der Berg, J."), "van der berg")
         self.assertEqual(surname("José Peña"), "pena")
+
+    def test_surname_particles_full_name_form(self):
+        # Comma form and full-name form must normalize the same way.
+        self.assertEqual(surname("Delle Monache, D."), "delle monache")
+        self.assertEqual(surname("Davide Delle Monache"), "delle monache")
+        self.assertEqual(surname("De Polis, A."), "de polis")
+        self.assertEqual(surname("Andrea De Polis"), "de polis")
 
     def test_title_similarity(self):
         self.assertEqual(title_similarity("Attention Is All You Need",
@@ -104,6 +112,39 @@ class TestParsers(unittest.TestCase):
     def test_latex_cite_keys(self):
         tex = r"Text \citep{a,b} and \cite[p.~3]{c} and \textcite{a}."
         self.assertEqual(extract_cite_keys(tex), ["a", "b", "c"])
+
+    def test_bare_year_title_extraction(self):
+        # "Authors, YEAR. Title. Venue." — the dominant \bibitem style.
+        e = ("Embrechts, P., Kluppelberg, C., Mikosch, T., 1997. "
+             "Modelling Extremal Events for Insurance and Finance. Springer.")
+        self.assertEqual(_guess_title(e),
+                         "Modelling Extremal Events for Insurance and Finance")
+
+    def test_clean_latex(self):
+        self.assertEqual(clean_latex(r"Kl\"{u}ppelberg"), "Kluppelberg")
+        self.assertEqual(clean_latex(r"G\'{o}mez"), "Gomez")
+        self.assertEqual(clean_latex(r"Statistics \& Data"), "Statistics & Data")
+
+    def test_thebibliography(self):
+        tex = (r"\begin{thebibliography}{00}" "\n"
+               r"\bibitem[Delle Monache et al.(2024)]{DelleMonache2024}" "\n"
+               "Delle Monache, D., De Polis, A., Petrella, I., 2024. "
+               "Modeling and forecasting macroeconomic downside risk. "
+               "Journal of Business \\& Economic Statistics 42, 1010--1025.\n"
+               r"\bibitem[G\'{o}mez et al.(2007)]{Gomez2007}" "\n"
+               "G\\'{o}mez, H.W., Venegas, O., 2007. Skew-symmetric distributions. "
+               "Environmetrics 18, 395--407.\n"
+               r"\end{thebibliography}")
+        claims = parse_thebibliography(tex)
+        self.assertEqual([c.key for c in claims],
+                         ["DelleMonache2024", "Gomez2007"])
+        dm = claims[0]
+        self.assertEqual(dm.title,
+                         "Modeling and forecasting macroeconomic downside risk")
+        self.assertEqual(dm.year, 2024)
+        self.assertEqual(surname(dm.authors[0]), "delle monache")
+        # LaTeX accents cleaned in the second entry's authors.
+        self.assertEqual(surname(claims[1].authors[0]), "gomez")
 
 
 class TestScholarFallback(unittest.TestCase):
