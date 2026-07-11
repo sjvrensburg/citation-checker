@@ -30,7 +30,25 @@ Build the URL (or reuse `scholar_url_for` from `citecheck.scholar`):
 https://scholar.google.com/scholar?hl=en&num=10&q=<URL-encoded scholar_query>
 ```
 
-Using browser-act: open the URL in a persistent session, wait for
+**Launch the browser HEADED — never headless.** `browser-act browser open`
+defaults to headless, and headless Chrome almost always draws Scholar's
+"unusual traffic" CAPTCHA: its fingerprint is detectable (webdriver flag,
+software WebGL renderer, missing plugin/font surface) and a fresh headless
+context carries zero cookie/history reputation. Always pass `--headed`:
+
+```bash
+browser-act browser open <browser-id> "<scholar-url>" --headed
+```
+
+Prefer a browser imported from the user's real Chrome profile
+(`browser-act browser list-profiles` → `browser-act browser import-profile`):
+established Google cookies dramatically reduce CAPTCHA rates. Headed mode is
+also the only recoverable mode — if a CAPTCHA does appear, the user solves it
+once in the visible window and the exemption cookie persists in the profile
+for the rest of the queue (use `remote-assist` if the window isn't visible to
+the user).
+
+Open the URL in a persistent session, wait for
 `#gs_res_ccl`, and extract the result rows. The DOM-scraping snippet (mirrors
 the selectors used by cookjohn/gs-skills) is available as
 `citecheck.scholar.SCHOLAR_SCRAPE_JS`; it returns JSON of the form:
@@ -71,6 +89,8 @@ an unverified citation as correct.
 
 ## Pacing & etiquette
 
+- **Headed, always** — headless is a CAPTCHA magnet (see Step 2) and leaves no
+  way for the user to clear a challenge.
 - One query at a time; pause between requests. Never fire rapid successive loads.
 - Keep `num=10`. Prefer the user's existing authenticated Chrome session.
 - If Scholar is unreachable or CAPTCHA-locked and the user can't help, stop and

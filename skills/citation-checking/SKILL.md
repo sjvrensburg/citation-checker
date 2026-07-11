@@ -117,6 +117,10 @@ see `references/scholar-fallback.md` for the exact procedure. In short:
 1. Get the `NEEDS_SCHOLAR` items and their `scholar_query` (use
    `--format-out json`).
 2. For each, use browser-act to open the Scholar results and scrape the rows.
+   **Launch headed** (`browser-act browser open … --headed`) — browser-act
+   defaults to headless, which almost always triggers Scholar's CAPTCHA;
+   a headed browser on an established profile usually sails through, and the
+   user can clear any challenge that does appear.
 3. Feed the scraped rows back through `python3 -m citecheck scholar-verdict` to
    get a proper field-by-field verdict (do **not** eyeball it).
 4. If Scholar shows a CAPTCHA, **stop and ask the user to solve it** — never
