@@ -79,8 +79,10 @@ found (CI-friendly), `0` otherwise.
 ### Google Scholar fallback
 
 `citecheck` marks unresolved citations `NEEDS_SCHOLAR` and emits a
-`scholar_query`. An agent drives Google Scholar through the **browser-act** skill
-(no API exists; GS CAPTCHAs bots), scrapes the results, and feeds them back:
+`scholar_query`. An agent drives Google Scholar through the
+**[browser-act](https://www.browseract.com)** skill (`uv tool install
+browser-act-cli`; no Scholar API exists, and GS CAPTCHAs bots), scrapes the
+results, and feeds them back:
 
 ```bash
 python3 -m citecheck scholar-verdict scraped.json   # {claim, results} -> verdict
