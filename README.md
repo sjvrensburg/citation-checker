@@ -7,11 +7,13 @@ AI-generated references:
 - 🚨 **Valid DOI, wrong paper** — the identifier resolves, but to a different
   work than the one cited.
 - ❌ **Right paper, wrong metadata** — the paper is real, but the authors, year,
-  or journal are wrong.
+  or journal are wrong — including an **invented co-author grafted onto a real
+  author list**, the subtlest hallucination.
 - ⛔ **Fabricated** — the reference (and/or its DOI) doesn't exist anywhere.
 
 `citecheck` resolves each citation's identity (DOI → Crossref/DataCite/OpenAlex/
-Semantic Scholar; arXiv id → arXiv; otherwise a title search), then compares
+Semantic Scholar; arXiv id → arXiv; otherwise a title search across Crossref,
+OpenAlex, Semantic Scholar, and arXiv), then compares
 **every asserted field** — title, first author, author set, year, venue — and
 reports exactly what disagrees. Items the open APIs can't resolve are queued for
 a **Google Scholar fallback** driven through a browser.
@@ -91,7 +93,7 @@ See `skills/citation-checking/references/scholar-fallback.md`.
 | Status | Meaning |
 |---|---|
 | `VERIFIED` | Resolved; all fields agree |
-| `MINOR_MISMATCH` | Same paper; cosmetic diff (venue abbrev, year ±1) |
+| `MINOR_MISMATCH` | Same paper; small diffs to review (venue abbreviation, preprint-year lag, a claimed co-author absent from the record) |
 | `METADATA_MISMATCH` | Right paper, wrong author/year/venue |
 | `DOI_MISMATCH` | Identifier resolves to a **different** paper |
 | `NOT_FOUND` | No canonical source matches (likely fabricated) |

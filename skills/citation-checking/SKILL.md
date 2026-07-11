@@ -82,7 +82,7 @@ Each citation gets one status (see `references/verdicts.md` for the full table):
 | Status | Meaning | What to do |
 |---|---|---|
 | ✅ `VERIFIED` | Resolved; all checked fields agree | Nothing |
-| 🟡 `MINOR_MISMATCH` | Same paper; cosmetic diff (venue abbrev, year ±1) | Optional tidy-up |
+| 🟡 `MINOR_MISMATCH` | Same paper; small diffs (venue abbrev, preprint-year lag, a claimed co-author absent from the record) | Read the notes — an absent co-author means the author list needs fixing |
 | ❌ `METADATA_MISMATCH` | Right paper, but **wrong author/year/venue** as cited | Fix the citation to match the found record |
 | 🚨 `DOI_MISMATCH` | The DOI/arXiv id resolves to a **different paper** | Replace the identifier or the citation — this is the classic fabrication |
 | ⛔ `NOT_FOUND` | No canonical source matches | Treat as fabricated unless Scholar confirms |
@@ -95,7 +95,16 @@ Each citation gets one status (see `references/verdicts.md` for the full table):
 
 **Always report mismatches with the specific diff** (what was claimed vs. what
 the source says), not just a pass/fail count. Use `-v` or `--format-out markdown`
-to surface the field-level detail to the user.
+to surface the field-level detail to the user. Read `MINOR_MISMATCH` notes too —
+a "claimed co-author(s) not found in record" note is a fabrication marker (AI
+author lists often graft one fake name onto a real paper), and preprint-lag /
+stub-title notes explain year and title gaps that are *not* errors.
+
+Two things the tool cannot see, so check them yourself on critical references:
+given-name errors that keep the surname ("Manuel" vs. "Matthias" Kirchler —
+surname matching passes), and `NEEDS_SCHOLAR` items that are famous-but-unindexed
+classics (Black 1976, RiskMetrics 1996) vs. genuinely suspicious working papers —
+the Scholar fallback decides those.
 
 ## Google Scholar fallback (only for NEEDS_SCHOLAR)
 
