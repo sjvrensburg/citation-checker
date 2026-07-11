@@ -23,7 +23,7 @@ from citecheck.sources import clean_doi, clean_arxiv
 # Identifier detection (used across parsers)
 # ---------------------------------------------------------------------------
 
-DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.I)
+DOI_RE = re.compile(r"\b10\.\d{4,9}/[-._;()/:<>A-Z0-9]+", re.I)  # <> for SICI DOIs
 ARXIV_RE = re.compile(
     r"arxiv[:\s]*(\d{4}\.\d{4,5}(v\d+)?)"
     r"|arxiv[:\s]*([a-z\-]+/\d{7})"

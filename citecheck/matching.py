@@ -112,6 +112,22 @@ def surname(name: str) -> str:
     return " ".join(last.split())
 
 
+def surname_in_name(sur: str, name: str) -> bool:
+    """True if surname ``sur`` appears as a contiguous token run in ``name``.
+
+    Sources sometimes return names in "Family Given" order with no comma
+    (Crossref book chapters: "Bollerslev Tim"), which makes the trailing-token
+    heuristic in :func:`surname` pick the given name. This fallback rescues
+    those cases by looking for the claimed surname anywhere in the full name.
+    """
+    if not sur or not name:
+        return False
+    toks = norm_text(name).split()
+    parts = sur.split()
+    return any(toks[i:i + len(parts)] == parts
+               for i in range(len(toks) - len(parts) + 1))
+
+
 def surnames(authors: List[str]) -> List[str]:
     out = []
     for a in authors:
@@ -160,7 +176,12 @@ def check_first_author(claim: Claim, rec: Record, th: Thresholds) -> Optional[Fi
         return None
     r_first = r_surs[0]
     ok = c_first == r_first or c_first in r_surs
-    sim = 1.0 if c_first == r_first else (0.7 if c_first in r_surs else 0.0)
+    if not ok and surname_in_name(c_first, rec.authors[0]):
+        # Record name is likely "Family Given" order; the trailing-token
+        # surname heuristic misfired. Treat as a first-author match.
+        ok, r_first = True, c_first
+    ok = ok or any(surname_in_name(c_first, a) for a in rec.authors)
+    sim = 1.0 if c_first == r_first else (0.7 if ok else 0.0)
     if ok and c_first != r_first:
         note = f"claimed first author '{c_first}' appears but not first (record leads with '{r_first}')"
         sev = "minor"
@@ -181,11 +202,24 @@ def check_authors(claim: Claim, rec: Record, th: Thresholds) -> Optional[FieldCh
     r = set(surnames(rec.authors))
     if not c or not r:
         return None
-    overlap = len(c & r) / len(c)   # fraction of *claimed* authors found in record
+    found = {s for s in c
+             if s in r or any(surname_in_name(s, a) for a in rec.authors)}
+    # Fraction of *claimed* authors found in the record. Google Scholar author
+    # lines are truncated, so judge only against the names Scholar showed.
+    denom = min(len(c), len(r)) if rec.source == "scholar" else len(c)
+    overlap = len(found) / denom if denom else 0.0
+    overlap = min(overlap, 1.0)
     ok = overlap >= th.author_overlap
-    missing = sorted(c - r)
+    missing = sorted(c - found)
     sev = "info" if ok else ("major" if overlap < 0.3 else "minor")
     note = "" if ok else f"claimed authors not in record: {missing}"
+    # Even when enough authors overlap, a claimed co-author who is absent from
+    # the canonical record is a fabrication marker worth surfacing (AI-invented
+    # author lists often graft one fake name onto a real paper). Google Scholar
+    # rows are exempt: their author lines are truncated, not authoritative.
+    if ok and missing and rec.source != "scholar":
+        ok, sev = False, "minor"
+        note = f"claimed co-author(s) not found in record: {missing}"
     return FieldCheck("authors", sorted(c), sorted(r), overlap, ok, sev, note)
 
 
@@ -279,6 +313,24 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
                         and len(corroborators) >= 2
                         and all(c.ok for c in corroborators))
         if corroborated:
+            # Publishers register generic stub titles for discussion pieces,
+            # comments, errata, etc. ("Discussion" for Engle's RFS piece). If
+            # the stub appears inside the fuller cited title, the citation is
+            # fine — the registry is just terse. Only a cosmetic note.
+            generic_stubs = {
+                "discussion", "comment", "reply", "rejoinder", "introduction",
+                "editorial", "erratum", "corrigendum", "preface", "foreword",
+                "book review", "letter to the editor",
+            }
+            rt = norm_text(rec.title)
+            if rt in generic_stubs and rt in norm_text(claim.title):
+                messages.append(
+                    f"The {rec.matched_by.upper()} points to the correct work; "
+                    f"the registry title is just the generic stub "
+                    f"“{rec.title}” while the citation carries the fuller "
+                    f"conventional title — publisher metadata quirk, not an error."
+                )
+                return Verdict(claim, MINOR_MISMATCH, conf, rec, checks, messages)
             messages.append(
                 f"The {rec.matched_by.upper()} points to the correct work "
                 f"(author, year, and venue match), but the cited TITLE does not "
@@ -330,6 +382,46 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
     majors = [c for c in checks if not c.ok and c.severity == "major"]
     minors = [c for c in checks if not c.ok and c.severity == "minor"]
 
+    # Books, manuals, and reports are poorly indexed: a title search often
+    # lands on a journal *review* of the book, a different edition, or a CRAN
+    # DOI stamped with the first-release year. Never assert a mismatch about a
+    # book from such a record — hand it to the Scholar fallback instead.
+    if (majors and rec.matched_by == "title-search"
+            and (claim.entry_type or "") in ("book", "manual", "techreport")):
+        messages.append(
+            f"Best candidate (“{rec.title}” — "
+            f"{', '.join(rec.authors[:3]) or 'unknown'}, {rec.year}) disagrees "
+            f"on {', '.join(c.field for c in majors)}, but books/reports are "
+            f"poorly indexed by the canonical APIs (this record may be a "
+            f"review or another edition). Not asserting a mismatch — needs a "
+            f"Google Scholar check."
+        )
+        v = Verdict(claim, NOT_FOUND, conf, None, checks, messages)
+        v.considered = [rec]
+        return v
+
+    # A lookup can land on the arXiv preprint of a later-published paper (JMLR
+    # and friends assign no Crossref DOI, so the preprint is often the only
+    # indexed record). If the ONLY major disagreement is the year, the record
+    # is a preprint, and the cited year is later, that's publication lag — a
+    # minor note, not a wrong-metadata verdict.
+    pre_title_strong = title_check is not None and title_check.similarity >= 0.95
+    pre_authors_clean = ((first_author_check is None or first_author_check.ok)
+                         and (authors_check is None or authors_check.ok))
+    is_preprint_rec = (rec.source == "arxiv"
+                       or "arxiv" in norm_text(rec.venue or "")
+                       or (rec.doi or "").startswith("10.48550/"))
+    if (majors and all(c.field == "year" for c in majors)
+            and is_preprint_rec and claim.year and rec.year
+            and claim.year > rec.year and pre_title_strong and pre_authors_clean):
+        for c in majors:
+            c.severity = "minor"
+            c.note = (f"cited year {claim.year} vs. preprint year {rec.year} — "
+                      f"record is the arXiv preprint; the cited year likely "
+                      f"refers to the published version")
+        minors.extend(majors)
+        majors = []
+
     if majors:
         for c in majors:
             messages.append(f"{c.field}: {c.note or 'mismatch'} "
@@ -366,18 +458,29 @@ def record_match_score(claim: Claim, rec: Record) -> float:
     title (e.g. a paper and a later review of it), the one actually written by
     the cited authors wins.
     """
-    score = title_similarity(claim.title, rec.title) if claim.title else 0.0
+    tsim = title_similarity(claim.title, rec.title) if claim.title else 0.0
+    score = tsim
+    # Author agreement can't be allowed to outvote the title entirely: a
+    # different paper by a same-surnamed author would otherwise outrank a
+    # perfect title match. Scale the author bonus by title similarity so it
+    # amplifies a plausible title rather than substituting for one.
+    author_scale = tsim if claim.title else 1.0
     if claim.authors and rec.authors:
         c = set(surnames(claim.authors))
         r = set(surnames(rec.authors))
         if c and r:
+            bonus = 0.0
             # First-author agreement is the strongest signal of "same work".
-            if surname(claim.authors[0]) in r:
-                score += 0.5
-            score += 0.3 * (len(c & r) / len(c))
+            first = surname(claim.authors[0])
+            if first in r or any(surname_in_name(first, a) for a in rec.authors):
+                bonus += 0.5
+            bonus += 0.3 * (len(c & r) / len(c))
+            score += author_scale * bonus
     if claim.year and rec.year:
         diff = abs(claim.year - rec.year)
-        if diff <= 1:
+        if diff == 0:
+            score += 0.15   # exact year: prefer the cited edition/version
+        elif diff == 1:
             score += 0.1
         elif diff >= 3:
             score -= 0.15   # penalize records from a very different year

@@ -57,6 +57,12 @@ def _year_from_parts(parts) -> Optional[int]:
 
 def _crossref_record(msg: dict, matched_by: str) -> Record:
     title = (msg.get("title") or [""])[0] or None
+    # Crossref often registers "Title: Subtitle" works with the subtitle in a
+    # separate field (e.g. ACM's "Optuna" + "A Next-generation Hyperparameter
+    # Optimization Framework"). Recombine, or title similarity collapses.
+    subtitle = (msg.get("subtitle") or [""])[0]
+    if title and subtitle and subtitle.lower() not in title.lower():
+        title = f"{title}: {subtitle}"
     authors = []
     for a in msg.get("author", []) or []:
         given, family = a.get("given", ""), a.get("family", "")
@@ -96,7 +102,7 @@ def crossref_by_doi(doi: str) -> Optional[Record]:
 def crossref_search(claim_title: str, author: Optional[str] = None,
                     rows: int = 5) -> List[Record]:
     params = {"query.bibliographic": claim_title, "rows": rows,
-              "select": "title,author,issued,container-title,DOI,URL,type,is-referenced-by-count"}
+              "select": "title,subtitle,author,issued,container-title,DOI,URL,type,is-referenced-by-count"}
     if author:
         params["query.author"] = author
     try:

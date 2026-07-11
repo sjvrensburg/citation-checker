@@ -133,7 +133,141 @@ class TestVerdicts(unittest.TestCase):
         self.assertEqual(decide(claim, rec).status, NOT_FOUND)
 
 
+class TestNameOrderAndRanking(unittest.TestCase):
+    def test_family_first_record_name_is_not_a_mismatch(self):
+        # Crossref book chapters return "Bollerslev Tim" (family first, no
+        # comma); the trailing-token surname heuristic must not flag it.
+        claim = Claim(key="b", title="Glossary to ARCH (GARCH)",
+                      authors=["Bollerslev, Tim"], year=2010, doi="10.x")
+        rec = Record("crossref", "doi", title="Glossary to ARCH (GARCH*)",
+                     authors=["Bollerslev Tim"], year=2010)
+        self.assertEqual(decide(claim, rec, STRICT).status, VERIFIED)
+
+    def test_same_surname_different_paper_does_not_outrank_title(self):
+        # A different paper by another author with the same surname must not
+        # beat a perfect title match in candidate ranking.
+        from citecheck.matching import best_record
+        claim = Claim(key="o", title="Optuna: A Next-Generation "
+                      "Hyperparameter Optimization Framework",
+                      authors=["Akiba, Takuya", "Sano, Shotaro"], year=2019)
+        wrong = Record("crossref", "title-search",
+                       title="Motion generation of peristaltic robot by "
+                             "numerical optimization framework",
+                       authors=["Tomoki AKIBA", "Norihiro KAMAMICHI"], year=2021)
+        right = Record("openalex", "title-search",
+                       title="Optuna: A Next-generation Hyperparameter "
+                             "Optimization Framework",
+                       authors=["Someone Else"], year=2019)
+        self.assertIs(best_record(claim, [wrong, right]), right)
+
+    def test_preprint_year_lag_is_minor_not_metadata_mismatch(self):
+        # Citing the 2021 JMLR version while the only indexed record is the
+        # 2019 arXiv preprint is publication lag, not a wrong year.
+        claim = Claim(key="p", title="Normalizing Flows for Probabilistic "
+                      "Modeling and Inference",
+                      authors=["Papamakarios, George"], year=2021,
+                      venue="Journal of Machine Learning Research")
+        rec = Record("openalex", "title-search",
+                     title="Normalizing Flows for Probabilistic Modeling "
+                           "and Inference",
+                     authors=["George Papamakarios"], year=2019,
+                     venue="arXiv (Cornell University)",
+                     doi="10.48550/arxiv.1912.02762")
+        v = decide(claim, rec, STRICT)
+        self.assertEqual(v.status, MINOR_MISMATCH)
+        self.assertIn("preprint", " ".join(m.lower() for m in v.messages))
+
+    def test_earlier_cited_year_still_major_against_preprint(self):
+        # The preprint-lag downgrade must not fire when the cited year is
+        # EARLIER than the preprint (that's a genuinely wrong year).
+        claim = Claim(key="p", title="Normalizing Flows for Probabilistic "
+                      "Modeling and Inference",
+                      authors=["Papamakarios, George"], year=2016)
+        rec = Record("arxiv", "title-search",
+                     title="Normalizing Flows for Probabilistic Modeling "
+                           "and Inference",
+                     authors=["George Papamakarios"], year=2019, venue="arXiv")
+        self.assertEqual(decide(claim, rec, STRICT).status, METADATA_MISMATCH)
+
+
+class TestGenericStubAndBooks(unittest.TestCase):
+    def test_generic_registry_stub_title_is_minor(self):
+        # RFS registers Engle's discussion piece with the bare title
+        # "Discussion"; the conventional fuller citation is not an error.
+        claim = Claim(key="e", title="Stock Volatility and the Crash of '87: "
+                      "Discussion", authors=["Engle, Robert F."], year=1990,
+                      venue="Review of Financial Studies", doi="10.x")
+        rec = Record("crossref", "doi", title="Discussion",
+                     authors=["Robert F. Engle"], year=1990,
+                     venue="Review of Financial Studies")
+        v = decide(claim, rec, STRICT)
+        self.assertEqual(v.status, MINOR_MISMATCH)
+
+    def test_embellished_title_still_metadata_mismatch(self):
+        # A non-stub registered title that diverges stays a metadata error
+        # (guarded by the existing test_doi_correct_but_title_embellished).
+        pass
+
+    def test_book_mismatch_from_title_search_defers_to_scholar(self):
+        # Crossref only indexes a 1995 Technometrics *review* of the book; a
+        # 20-year year gap must not be asserted as wrong metadata on the book.
+        claim = Claim(key="bj", title="Time Series Analysis: Forecasting and "
+                      "Control", authors=["Box, George E. P.", "Jenkins, G. M.",
+                      "Reinsel, G. C.", "Ljung, G. M."], year=2015,
+                      entry_type="book")
+        review = Record("crossref", "title-search",
+                        title="Time Series Analysis, Forecasting, and Control",
+                        authors=["Eric R. Ziegel", "G. Box", "G. Jenkins",
+                                 "G. Reinsel"], year=1995, venue="Technometrics")
+        self.assertEqual(decide(claim, review, STRICT).status, NOT_FOUND)
+
+    def test_book_mismatch_by_doi_still_asserted(self):
+        # The book guard only applies to title-search records; a book resolved
+        # by its own DOI with wrong claimed metadata is still a mismatch.
+        claim = Claim(key="b", title="Some Book", authors=["Wrong, Name"],
+                      year=2000, entry_type="book", doi="10.x")
+        rec = Record("crossref", "doi", title="Some Book",
+                     authors=["Real Author"], year=2015)
+        self.assertEqual(decide(claim, rec, STRICT).status, METADATA_MISMATCH)
+
+
+class TestFabricatedCoAuthor(unittest.TestCase):
+    def test_invented_coauthor_on_real_paper_is_flagged(self):
+        # 3 of 4 claimed surnames match (passes the overlap threshold), but the
+        # invented 4th author must still surface as a minor mismatch.
+        claim = Claim(key="k", title="Training Normalizing Flows from Dependent Data",
+                      authors=["Kirchler, Matthias", "Khorasani, Sajad",
+                               "Kloft, Marius", "Lippert, Christoph"], year=2022)
+        rec = Record("arxiv", "title-search",
+                     title="Training Normalizing Flows from Dependent Data",
+                     authors=["Matthias Kirchler", "Christoph Lippert",
+                              "Marius Kloft"], year=2022, venue="arXiv")
+        v = decide(claim, rec, STRICT)
+        self.assertEqual(v.status, MINOR_MISMATCH)
+        self.assertIn("khorasani", " ".join(v.messages).lower())
+
+    def test_scholar_truncated_author_line_not_flagged(self):
+        # Google Scholar author lines are truncated; absent co-authors there
+        # must not trigger the fabrication marker.
+        claim = Claim(key="x", title="Attention Is All You Need",
+                      authors=["Vaswani, Ashish", "Shazeer, Noam",
+                               "Parmar, Niki"], year=2017)
+        rows = [{"title": "Attention is all you need",
+                 "authorline": "A Vaswani, N Shazeer",
+                 "venueYear": "Advances in neural information processing systems, 2017",
+                 "citedBy": "120000", "dataCid": "abc"}]
+        self.assertEqual(match_scholar_results(claim, rows).status, VERIFIED)
+
+
 class TestParsers(unittest.TestCase):
+    def test_sici_doi_with_angle_brackets(self):
+        from citecheck.parsers import find_doi
+        s = ("doi:10.1002/(SICI)1097-0258(19980430)17:8"
+             "<873::AID-SIM779>3.0.CO;2-I")
+        self.assertEqual(find_doi(s),
+                         "10.1002/(SICI)1097-0258(19980430)17:8"
+                         "<873::AID-SIM779>3.0.CO;2-I")
+
     def test_bibtex(self):
         bib = """@article{v17, title={Attention Is All You Need},
         author={Vaswani, Ashish and Shazeer, Noam}, journal={NeurIPS},

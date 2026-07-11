@@ -25,6 +25,10 @@ USER_AGENT = f"citecheck/{__version__} (https://github.com/; mailto:{_MAILTO})"
 
 # Minimum seconds between requests to the same host (be a good API citizen).
 _MIN_INTERVAL = float(os.environ.get("CITECHECK_MIN_INTERVAL", "0.34"))
+# Hosts with tighter public rate limits than the default.
+_HOST_INTERVAL = {
+    "api.semanticscholar.org": 1.1,   # keyless tier 429s aggressively
+}
 _last_call: Dict[str, float] = {}
 
 
@@ -37,7 +41,7 @@ class HttpError(Exception):
 def _throttle(host: str) -> None:
     now = time.monotonic()
     prev = _last_call.get(host, 0.0)
-    wait = _MIN_INTERVAL - (now - prev)
+    wait = max(_MIN_INTERVAL, _HOST_INTERVAL.get(host, 0.0)) - (now - prev)
     if wait > 0:
         time.sleep(wait)
     _last_call[host] = time.monotonic()

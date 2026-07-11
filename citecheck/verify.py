@@ -61,6 +61,9 @@ def _resolve_by_title(claim: Claim) -> List[Record]:
         lambda: S.crossref_search(claim.title, author),
         lambda: S.openalex_search(claim.title),
         lambda: S.s2_search(claim.title),
+        # arXiv last: covers ML/stats preprints the general indexes miss
+        # (conference papers like ICML/NeurIPS often only exist there).
+        lambda: S.arxiv_search(claim.title),
     ]
     from citecheck.matching import surname, surnames
     claim_first = surname(claim.authors[0]) if claim.authors else None
