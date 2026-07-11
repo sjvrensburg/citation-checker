@@ -49,7 +49,9 @@ SCHOLAR_SCRAPE_JS = r"""
   const items = document.querySelectorAll('#gs_res_ccl .gs_r.gs_or.gs_scl');
   const results = Array.from(items).slice(0, 10).map(it => {
     const meta = (it.querySelector('.gs_a')?.textContent || '');
-    const parts = meta.split(' - ');
+    // Scholar separates author/venue/domain with " - ", but the whitespace
+    // around the first hyphen is a non-breaking space — split accordingly.
+    const parts = meta.split(/[\s ]+-[\s ]+/);
     return {
       title: (it.querySelector('.gs_rt a') || it.querySelector('.gs_rt'))
                ?.textContent?.trim() || '',
@@ -70,6 +72,12 @@ SCHOLAR_SCRAPE_JS = r"""
 def _scholar_result_to_record(item: dict) -> Record:
     """Convert one scraped Google Scholar row into a Record."""
     import re
+    title = item.get("title") or ""
+    # Citation-only rows carry bracket tags in the title ("[CITATION][C] …",
+    # "[BOOK][B] …"), and some entries append editorial annotations
+    # ("… [with discussion and reply]"). Strip both or title similarity sinks.
+    title = re.sub(r"^(\s*\[[^\]]{1,12}\])+\s*", "", title)
+    title = re.sub(r"\s*\[[^\]]*\]\s*$", "", title)
     venue_year = item.get("venueYear", "") or ""
     year = None
     m = re.search(r"\b(1[89]\d{2}|20\d{2})\b", venue_year)
@@ -84,7 +92,7 @@ def _scholar_result_to_record(item: dict) -> Record:
     except (TypeError, ValueError):
         cb = None
     return Record(source="scholar", matched_by="title-search",
-                  title=item.get("title") or None, authors=authors,
+                  title=title or None, authors=authors,
                   year=year, venue=venue or None,
                   url=item.get("fullTextUrl") or None, citation_count=cb,
                   extra={"data_cid": item.get("dataCid")})

@@ -350,6 +350,27 @@ class TestScholarFallback(unittest.TestCase):
                  "citedBy": "120000", "dataCid": "abc"}]
         self.assertEqual(match_scholar_results(claim, rows).status, VERIFIED)
 
+    def test_scholar_citation_tag_stripped_from_title(self):
+        # Citation-only rows title as "[CITATION][C] …" — the tag must not
+        # depress title similarity.
+        claim = Claim(key="rm", title="RiskMetrics --- Technical Document",
+                      authors=["J.P. Morgan/Reuters"], year=1996)
+        rows = [{"title": "[CITATION][C] RiskMetrics—Technical Document",
+                 "authorline": "JP Morgan/Reuters", "venueYear": "1996",
+                 "citedBy": "33", "dataCid": "x"}]
+        self.assertEqual(match_scholar_results(claim, rows).status, VERIFIED)
+
+    def test_scholar_trailing_annotation_stripped(self):
+        claim = Claim(key="cox", title="Statistical Analysis of Time Series: "
+                      "Some Recent Developments", authors=["Cox, David R."],
+                      year=1981)
+        rows = [{"title": "Statistical analysis of time series: Some recent "
+                          "developments [with discussion and reply]",
+                 "authorline": "DR Cox, G Gudmundsson",
+                 "venueYear": "Scandinavian Journal of Statistics, 1981",
+                 "citedBy": "300", "dataCid": "y"}]
+        self.assertEqual(match_scholar_results(claim, rows).status, VERIFIED)
+
     def test_scholar_no_results_is_not_found(self):
         claim = Claim(key="x", title="A Fabricated Paper", year=2021)
         self.assertEqual(match_scholar_results(claim, []).status, NOT_FOUND)

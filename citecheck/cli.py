@@ -110,6 +110,7 @@ def cmd_scholar_verdict(args: argparse.Namespace) -> int:
         title=cd.get("title"), authors=cd.get("authors", []) or [],
         year=cd.get("year"), venue=cd.get("venue"),
         doi=cd.get("doi"), arxiv_id=cd.get("arxiv_id"),
+        entry_type=cd.get("entry_type"),
     )
     results = payload.get("results", []) or []
     th = LENIENT if args.lenient else STRICT

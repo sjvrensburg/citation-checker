@@ -388,13 +388,14 @@ def decide(claim: Claim, rec: Record, th: Thresholds = STRICT) -> Verdict:
     # book from such a record — hand it to the Scholar fallback instead.
     if (majors and rec.matched_by == "title-search"
             and (claim.entry_type or "") in ("book", "manual", "techreport")):
+        tail = ("verify the edition/version manually" if rec.source == "scholar"
+                else "needs a Google Scholar check")
         messages.append(
             f"Best candidate (“{rec.title}” — "
             f"{', '.join(rec.authors[:3]) or 'unknown'}, {rec.year}) disagrees "
             f"on {', '.join(c.field for c in majors)}, but books/reports are "
-            f"poorly indexed by the canonical APIs (this record may be a "
-            f"review or another edition). Not asserting a mismatch — needs a "
-            f"Google Scholar check."
+            f"poorly indexed (this record may be a review, another edition, or "
+            f"an older package version). Not asserting a mismatch — {tail}."
         )
         v = Verdict(claim, NOT_FOUND, conf, None, checks, messages)
         v.considered = [rec]
